@@ -1,27 +1,38 @@
 package com.demo.upimesh.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 
 /**
- * Simulated bank account. In a real system this would live in the bank's core,
- * not in our service. For the demo, we own the ledger.
+ * Simulated bank account owned by this demo (not a real bank core).
+ * {@code version} remains as a second fence; settlement serializes with
+ * SELECT FOR UPDATE rather than relying on optimistic retries.
  */
 @Entity
 @Table(name = "accounts")
 public class Account {
 
     @Id
-    private String vpa; // Virtual Payment Address, e.g. "alice@demo"
+    @Column(name = "vpa", length = 64)
+    private String vpa;
 
-    @Column(nullable = false)
+    @Column(name = "holder_name", nullable = false, length = 128)
     private String holderName;
 
-    @Column(nullable = false, precision = 19, scale = 2)
+    @Column(name = "balance", nullable = false, precision = 19, scale = 2)
     private BigDecimal balance;
 
-    @Version  // Optimistic locking — prevents lost updates on concurrent transfers
+    /** X.509-encoded Ed25519 public key (Base64). Modeled as device-held. */
+    @Column(name = "ed25519_public_key", nullable = false, length = 128)
+    private String ed25519PublicKey;
+
+    @Version
+    @Column(name = "version")
     private Long version;
 
     public Account() {}
@@ -40,6 +51,9 @@ public class Account {
 
     public BigDecimal getBalance() { return balance; }
     public void setBalance(BigDecimal balance) { this.balance = balance; }
+
+    public String getEd25519PublicKey() { return ed25519PublicKey; }
+    public void setEd25519PublicKey(String ed25519PublicKey) { this.ed25519PublicKey = ed25519PublicKey; }
 
     public Long getVersion() { return version; }
     public void setVersion(Long version) { this.version = version; }

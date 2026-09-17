@@ -3,38 +3,28 @@ package com.demo.upimesh.model;
 import java.math.BigDecimal;
 
 /**
- * The actual payment instruction. After the server decrypts MeshPacket.ciphertext,
- * it gets one of these.
+ * Inner payment intent. This is what the simulated device signs, then encrypts
+ * to the settlement server. Intermediaries never see these fields in the clear.
  *
- * Critical fields for security:
- *   - nonce: a UUID unique to this payment. Even if everything else were identical
- *            for two legitimate payments (alice sends bob ₹100 twice), the nonces
- *            differ, so the resulting ciphertexts and their hashes also differ.
- *   - signedAt: lets the server reject stale packets ("freshness window"). Without
- *               this, an attacker who got the ciphertext could replay it weeks later.
- *   - pinHash: in a real system the user enters a UPI PIN; we'd verify it against
- *              a hash held by the bank. Here we just record it for realism.
+ * paymentId is the durable financial identity. nonce is extra entropy so two
+ * otherwise-identical intents still produce distinct ciphertexts.
  */
 public class PaymentInstruction {
 
+    private String paymentId;
     private String senderVpa;
     private String receiverVpa;
     private BigDecimal amount;
-    private String pinHash;
-    private String nonce;     // UUID, unique per payment intent
-    private Long signedAt;    // epoch millis, when sender signed
+    private String nonce;
+    private Long issuedAt;
+    private Long expiresAt;
+    /** Ed25519 signature over the canonical intent fields. Not itself signed. */
+    private String senderSignature;
 
     public PaymentInstruction() {}
 
-    public PaymentInstruction(String senderVpa, String receiverVpa, BigDecimal amount,
-                              String pinHash, String nonce, Long signedAt) {
-        this.senderVpa = senderVpa;
-        this.receiverVpa = receiverVpa;
-        this.amount = amount;
-        this.pinHash = pinHash;
-        this.nonce = nonce;
-        this.signedAt = signedAt;
-    }
+    public String getPaymentId() { return paymentId; }
+    public void setPaymentId(String paymentId) { this.paymentId = paymentId; }
 
     public String getSenderVpa() { return senderVpa; }
     public void setSenderVpa(String senderVpa) { this.senderVpa = senderVpa; }
@@ -45,12 +35,15 @@ public class PaymentInstruction {
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }
 
-    public String getPinHash() { return pinHash; }
-    public void setPinHash(String pinHash) { this.pinHash = pinHash; }
-
     public String getNonce() { return nonce; }
     public void setNonce(String nonce) { this.nonce = nonce; }
 
-    public Long getSignedAt() { return signedAt; }
-    public void setSignedAt(Long signedAt) { this.signedAt = signedAt; }
+    public Long getIssuedAt() { return issuedAt; }
+    public void setIssuedAt(Long issuedAt) { this.issuedAt = issuedAt; }
+
+    public Long getExpiresAt() { return expiresAt; }
+    public void setExpiresAt(Long expiresAt) { this.expiresAt = expiresAt; }
+
+    public String getSenderSignature() { return senderSignature; }
+    public void setSenderSignature(String senderSignature) { this.senderSignature = senderSignature; }
 }

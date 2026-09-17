@@ -1,92 +1,148 @@
 package com.demo.upimesh.service;
 
 import com.demo.upimesh.crypto.HybridCryptoService;
+import com.demo.upimesh.crypto.SenderSignatureService;
+import com.demo.upimesh.model.Account;
+import com.demo.upimesh.model.AccountRepository;
+import com.demo.upimesh.model.DeliveryAttempt;
 import com.demo.upimesh.model.MeshPacket;
 import com.demo.upimesh.model.PaymentInstruction;
-import com.demo.upimesh.model.Transaction;
+import com.demo.upimesh.model.TransactionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.security.PublicKey;
 import java.time.Instant;
+import java.util.Objects;
 
 /**
- * Orchestrates the full server-side pipeline for one inbound packet from a
- * bridge node:
+ * Bridge ingest pipeline for an offline payment packet:
+ * hash → decrypt+AAD → sender signature → freshness → settle.
  *
- *   1. Hash the ciphertext.
- *   2. Try to claim that hash via the idempotency cache.
- *      - If already claimed: this is a duplicate. Drop it.
- *   3. Decrypt the ciphertext with the server's private key.
- *      - If decryption fails: tampered or junk. Reject.
- *   4. Check freshness — reject if signedAt is too old (replay protection).
- *   5. Hand off to SettlementService for the actual debit/credit.
+ * Delivery is at-least-once. Financial effect is at-most-one per payment_id.
  */
 @Service
 public class BridgeIngestionService {
 
     private static final Logger log = LoggerFactory.getLogger(BridgeIngestionService.class);
+    private static final long CLOCK_SKEW_MS = 300_000L;
 
-    @Autowired private HybridCryptoService crypto;
-    @Autowired private IdempotencyService idempotency;
-    @Autowired private SettlementService settlement;
+    private final HybridCryptoService crypto;
+    private final SettlementService settlement;
+    private final DeliveryAttemptService attempts;
+    private final AccountRepository accounts;
+    private final TransactionRepository transactions;
+    private final MeshMetrics metrics;
+    private final long maxAgeSeconds;
 
-    @Value("${upi.mesh.packet-max-age-seconds:86400}")
-    private long maxAgeSeconds;
+    public BridgeIngestionService(HybridCryptoService crypto,
+                                  SettlementService settlement,
+                                  DeliveryAttemptService attempts,
+                                  AccountRepository accounts,
+                                  TransactionRepository transactions,
+                                  MeshMetrics metrics,
+                                  @Value("${upi.mesh.packet-max-age-seconds:86400}") long maxAgeSeconds) {
+        this.crypto = crypto;
+        this.settlement = settlement;
+        this.attempts = attempts;
+        this.accounts = accounts;
+        this.transactions = transactions;
+        this.metrics = metrics;
+        this.maxAgeSeconds = maxAgeSeconds;
+    }
 
-    public IngestResult ingest(MeshPacket packet, String bridgeNodeId, int hopCount) {
+    public IngestResult ingest(MeshPacket packet, String bridgeNodeId) {
+        String packetHash = "?";
         try {
-            String packetHash = crypto.hashCiphertext(packet.getCiphertext());
-
-            // ---- Idempotency gate ----
-            if (!idempotency.claim(packetHash)) {
-                log.info("DUPLICATE packet {} from bridge {} — dropped",
-                        packetHash.substring(0, 12) + "...", bridgeNodeId);
-                return IngestResult.duplicate(packetHash);
+            if (packet == null || packet.getCiphertext() == null || packet.getCiphertext().isBlank()) {
+                return invalid(packet, packetHash, bridgeNodeId, "missing_ciphertext");
             }
+            packetHash = crypto.hashCiphertext(packet.getCiphertext());
 
-            // ---- Decrypt ----
             PaymentInstruction instruction;
             try {
-                instruction = crypto.decrypt(packet.getCiphertext());
+                instruction = crypto.decrypt(packet.getCiphertext(), packet.getPacketId(), packet.getPaymentId());
             } catch (Exception e) {
-                log.warn("Decryption failed for packet {}: {}",
-                        packetHash.substring(0, 12) + "...", e.getMessage());
-                return IngestResult.invalid(packetHash, "decryption_failed");
+                log.warn("Decryption failed from {}: {}", bridgeNodeId, e.getMessage());
+                return invalid(packet, packetHash, bridgeNodeId, "decryption_failed");
             }
 
-            // ---- Freshness check (replay protection) ----
-            long ageSeconds = (Instant.now().toEpochMilli() - instruction.getSignedAt()) / 1000;
-            if (ageSeconds > maxAgeSeconds) {
-                log.warn("Packet {} too old ({}s), rejected",
-                        packetHash.substring(0, 12) + "...", ageSeconds);
-                return IngestResult.invalid(packetHash, "stale_packet");
-            }
-            if (ageSeconds < -300) { // small clock-skew tolerance
-                return IngestResult.invalid(packetHash, "future_dated");
+            if (!Objects.equals(instruction.getPaymentId(), packet.getPaymentId())) {
+                return invalid(packet, packetHash, bridgeNodeId, "payment_id_mismatch");
             }
 
-            // ---- Settle ----
-            Transaction tx = settlement.settle(instruction, packetHash, bridgeNodeId, hopCount);
-            return IngestResult.settled(packetHash, tx);
+            String amountError = MoneyRules.validateAmount(instruction.getAmount());
+            if (amountError != null) {
+                return invalid(packet, packetHash, bridgeNodeId, amountError);
+            }
+            if (instruction.getSenderVpa() == null || instruction.getReceiverVpa() == null) {
+                return invalid(packet, packetHash, bridgeNodeId, "missing_vpa");
+            }
+            if (instruction.getSenderVpa().equals(instruction.getReceiverVpa())) {
+                return invalid(packet, packetHash, bridgeNodeId, "self_transfer");
+            }
 
+            String freshness = checkFreshness(instruction);
+            if (freshness != null) {
+                return invalid(packet, packetHash, bridgeNodeId, freshness);
+            }
+
+            Account sender = accounts.findById(instruction.getSenderVpa()).orElse(null);
+            if (sender == null) {
+                return invalid(packet, packetHash, bridgeNodeId, "unknown_sender");
+            }
+            try {
+                PublicKey senderKey = SenderSignatureService.parsePublicKey(sender.getEd25519PublicKey());
+                if (!SenderSignatureService.verify(instruction, senderKey)) {
+                    return invalid(packet, packetHash, bridgeNodeId, "invalid_signature");
+                }
+            } catch (Exception e) {
+                return invalid(packet, packetHash, bridgeNodeId, "invalid_signature");
+            }
+
+            return settlement.settle(instruction, packet, packetHash, bridgeNodeId);
+        } catch (DuplicateDeliveryException e) {
+            return duplicateAfterConstraint(packet, e.packetHash(), bridgeNodeId, e.paymentId());
         } catch (Exception e) {
-            log.error("Ingestion error: {}", e.getMessage(), e);
-            return IngestResult.invalid("?", "internal_error: " + e.getMessage());
+            log.error("Ingestion error from {}: {}", bridgeNodeId, e.getMessage(), e);
+            return invalid(packet, packetHash, bridgeNodeId, "internal_error");
         }
     }
 
-    public record IngestResult(String outcome, String packetHash, String reason, Long transactionId) {
-        public static IngestResult settled(String hash, Transaction tx) {
-            return new IngestResult("SETTLED", hash, null, tx.getId());
+    private String checkFreshness(PaymentInstruction instruction) {
+        if (instruction.getIssuedAt() == null || instruction.getExpiresAt() == null) {
+            return "missing_timestamp";
         }
-        public static IngestResult duplicate(String hash) {
-            return new IngestResult("DUPLICATE_DROPPED", hash, null, null);
+        long now = Instant.now().toEpochMilli();
+        if (instruction.getIssuedAt() - now > CLOCK_SKEW_MS) {
+            return "future_dated";
         }
-        public static IngestResult invalid(String hash, String reason) {
-            return new IngestResult("INVALID", hash, reason, null);
+        if (now > instruction.getExpiresAt()) {
+            return "stale_packet";
         }
+        long maxAgeMs = maxAgeSeconds * 1000L;
+        if (now - instruction.getIssuedAt() > maxAgeMs) {
+            return "stale_packet";
+        }
+        return null;
+    }
+
+    private IngestResult invalid(MeshPacket packet, String packetHash, String bridgeNodeId, String reason) {
+        DeliveryAttempt attempt = attempts.recordCommitted(packet, packetHash, bridgeNodeId,
+                IngestResult.IngestOutcome.INVALID.name(), reason, null);
+        metrics.ingest(IngestResult.IngestOutcome.INVALID);
+        String paymentId = packet == null ? null : packet.getPaymentId();
+        return IngestResult.invalid(paymentId, packetHash, reason, attempt.getId());
+    }
+
+    private IngestResult duplicateAfterConstraint(MeshPacket packet, String packetHash,
+                                                  String bridgeNodeId, String paymentId) {
+        Long txId = transactions.findByPaymentId(paymentId).map(tx -> tx.getId()).orElse(null);
+        DeliveryAttempt attempt = attempts.recordCommitted(packet, packetHash, bridgeNodeId,
+                IngestResult.IngestOutcome.DUPLICATE.name(), "duplicate_delivery", txId);
+        metrics.ingest(IngestResult.IngestOutcome.DUPLICATE);
+        return IngestResult.duplicate(paymentId, packetHash, txId, attempt.getId());
     }
 }

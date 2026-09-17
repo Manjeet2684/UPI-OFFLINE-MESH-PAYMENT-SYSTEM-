@@ -1,50 +1,63 @@
 package com.demo.upimesh.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
- * Permanent record of every settled transaction. Once written, never modified.
- * The packetHash is the idempotency key — uniqueness is enforced at the DB level
- * as a defense-in-depth fallback if the Redis-style cache layer ever fails.
+ * One durable financial effect per payment intent.
+ * Inserting this row is the idempotency claim: UNIQUE(payment_id) and UNIQUE(packet_hash).
  */
 @Entity
 @Table(name = "transactions",
-        indexes = { @Index(name = "idx_packet_hash", columnList = "packetHash", unique = true) })
+        indexes = {
+                @Index(name = "uk_payment_id", columnList = "payment_id", unique = true),
+                @Index(name = "uk_packet_hash", columnList = "packet_hash", unique = true)
+        })
 public class Transaction {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 64)
-    private String packetHash; // SHA-256 hex of the encrypted packet
+    @Column(name = "payment_id", nullable = false, unique = true, length = 36)
+    private String paymentId;
 
-    @Column(nullable = false)
+    @Column(name = "packet_hash", nullable = false, unique = true, length = 64)
+    private String packetHash;
+
+    @Column(name = "sender_vpa", nullable = false, length = 64)
     private String senderVpa;
 
-    @Column(nullable = false)
+    @Column(name = "receiver_vpa", nullable = false, length = 64)
     private String receiverVpa;
 
-    @Column(nullable = false, precision = 19, scale = 2)
+    @Column(name = "amount", nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
-    @Column(nullable = false)
-    private Instant signedAt; // When the sender originally signed it (offline)
+    @Column(name = "issued_at", nullable = false)
+    private Instant issuedAt;
 
-    @Column(nullable = false)
-    private Instant settledAt; // When the backend actually processed it
+    @Column(name = "settled_at", nullable = false)
+    private Instant settledAt;
 
-    @Column(nullable = false)
-    private String bridgeNodeId; // Which mesh node finally delivered it
+    @Column(name = "bridge_node_id", nullable = false, length = 64)
+    private String bridgeNodeId;
 
-    @Column(nullable = false)
-    private int hopCount; // How many devices it passed through
+    @Column(name = "hop_count", nullable = false)
+    private int hopCount;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "status", nullable = false, length = 32)
     private Status status;
 
     public enum Status { SETTLED, REJECTED }
@@ -53,6 +66,9 @@ public class Transaction {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
+    public String getPaymentId() { return paymentId; }
+    public void setPaymentId(String paymentId) { this.paymentId = paymentId; }
 
     public String getPacketHash() { return packetHash; }
     public void setPacketHash(String packetHash) { this.packetHash = packetHash; }
@@ -66,8 +82,8 @@ public class Transaction {
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }
 
-    public Instant getSignedAt() { return signedAt; }
-    public void setSignedAt(Instant signedAt) { this.signedAt = signedAt; }
+    public Instant getIssuedAt() { return issuedAt; }
+    public void setIssuedAt(Instant issuedAt) { this.issuedAt = issuedAt; }
 
     public Instant getSettledAt() { return settledAt; }
     public void setSettledAt(Instant settledAt) { this.settledAt = settledAt; }

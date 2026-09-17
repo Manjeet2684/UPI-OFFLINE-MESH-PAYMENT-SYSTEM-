@@ -1,43 +1,69 @@
 package com.demo.upimesh.model;
 
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Min;
 
 /**
- * The over-the-wire format. This is what hops from phone to phone via Bluetooth.
+ * Over-the-mesh envelope. Outer fields are visible to forwarding devices.
  *
- * The intermediate phones can read the OUTER fields (packetId, ttl, createdAt)
- * because they need them for routing and dedup. They CANNOT read `ciphertext` —
- * that's encrypted with the server's public key.
- *
- * NOTE on outer-field tampering:
- *   A malicious intermediate could change `packetId` or `createdAt`. That's why
- *   we use the ciphertext's hash (not packetId) as the idempotency key on the
- *   server. The ciphertext is authenticated by hybrid encryption, so any
- *   tampering inside the encrypted blob is detected on decryption.
+ * Immutable identifiers (packetId, paymentId) are bound as AES-GCM AAD so they
+ * cannot be swapped onto a different ciphertext. TTL, hopCount, path and the
+ * delivering bridge are mutable routing metadata and are NOT authenticated.
  */
 public class MeshPacket {
 
     @NotBlank
-    private String packetId; // UUID, used by intermediates for gossip dedup
-
-    @Min(0)
-    private int ttl; // Hops remaining; intermediates decrement it
-
-    @NotNull
-    private Long createdAt; // epoch millis, when sender created the packet
+    private String packetId;
 
     @NotBlank
-    private String ciphertext; // base64(RSA-encrypted AES key + AES-GCM ciphertext)
+    private String paymentId;
+
+    @Min(0)
+    private int ttl;
+
+    @Min(0)
+    private int hopCount;
+
+    /** Comma-separated device ids this copy has visited. Telemetry only. */
+    private String path;
+
+    @NotNull
+    private Long createdAt;
+
+    @NotBlank
+    private String ciphertext;
 
     public MeshPacket() {}
+
+    public MeshPacket copyForForward(String nextDeviceId) {
+        MeshPacket copy = new MeshPacket();
+        copy.packetId = this.packetId;
+        copy.paymentId = this.paymentId;
+        copy.ttl = this.ttl - 1;
+        copy.hopCount = this.hopCount + 1;
+        copy.path = (this.path == null || this.path.isBlank())
+                ? nextDeviceId
+                : this.path + "," + nextDeviceId;
+        copy.createdAt = this.createdAt;
+        copy.ciphertext = this.ciphertext;
+        return copy;
+    }
 
     public String getPacketId() { return packetId; }
     public void setPacketId(String packetId) { this.packetId = packetId; }
 
+    public String getPaymentId() { return paymentId; }
+    public void setPaymentId(String paymentId) { this.paymentId = paymentId; }
+
     public int getTtl() { return ttl; }
     public void setTtl(int ttl) { this.ttl = ttl; }
+
+    public int getHopCount() { return hopCount; }
+    public void setHopCount(int hopCount) { this.hopCount = hopCount; }
+
+    public String getPath() { return path; }
+    public void setPath(String path) { this.path = path; }
 
     public Long getCreatedAt() { return createdAt; }
     public void setCreatedAt(Long createdAt) { this.createdAt = createdAt; }

@@ -3,21 +3,29 @@ package com.demo.upimesh.service;
 import com.demo.upimesh.model.MeshPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.time.Instant;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Simulates the Bluetooth mesh.
+ * Controlled flooding on a small static mesh graph. Not gossip, not BLE.
  *
- * Each VirtualDevice represents a phone. The "gossip" step picks pairs of
- * devices that are nearby (we just say all devices are nearby for the demo)
- * and copies packets between them, decrementing TTL each hop.
+ * Topology (two paths, two bridges):
  *
- * When a device with internet (a "bridge node") holds a packet, the demo's
- * /api/mesh/flush endpoint causes it to actually POST that packet to our
- * backend — simulating the moment a phone walks outside and gets 4G.
+ *   phone-alice
+ *        |
+ *   phone-relay ---- phone-market
+ *        |                 |
+ *  phone-bridge-1    phone-bridge-2
  */
 @Service
 public class MeshSimulatorService {
@@ -25,18 +33,29 @@ public class MeshSimulatorService {
     private static final Logger log = LoggerFactory.getLogger(MeshSimulatorService.class);
 
     private final Map<String, VirtualDevice> devices = new ConcurrentHashMap<>();
+    private final long maxAgeSeconds;
 
-    public MeshSimulatorService() {
-        // Default scenario: 4 offline phones in a basement, 1 phone outside with 4G
+    public MeshSimulatorService(@Value("${upi.mesh.packet-max-age-seconds:86400}") long maxAgeSeconds) {
+        this.maxAgeSeconds = maxAgeSeconds;
         seedDefaultDevices();
     }
 
     private void seedDefaultDevices() {
-        devices.put("phone-alice",   new VirtualDevice("phone-alice",   false));
-        devices.put("phone-stranger1", new VirtualDevice("phone-stranger1", false));
-        devices.put("phone-stranger2", new VirtualDevice("phone-stranger2", false));
-        devices.put("phone-stranger3", new VirtualDevice("phone-stranger3", false));
-        devices.put("phone-bridge",  new VirtualDevice("phone-bridge",  true));
+        devices.put("phone-alice", new VirtualDevice("phone-alice", false));
+        devices.put("phone-relay", new VirtualDevice("phone-relay", false));
+        devices.put("phone-market", new VirtualDevice("phone-market", false));
+        devices.put("phone-bridge-1", new VirtualDevice("phone-bridge-1", true));
+        devices.put("phone-bridge-2", new VirtualDevice("phone-bridge-2", true));
+
+        link("phone-alice", "phone-relay");
+        link("phone-relay", "phone-market");
+        link("phone-relay", "phone-bridge-1");
+        link("phone-market", "phone-bridge-2");
+    }
+
+    private void link(String a, String b) {
+        devices.get(a).addNeighbor(b);
+        devices.get(b).addNeighbor(a);
     }
 
     public Collection<VirtualDevice> getDevices() {
@@ -47,32 +66,28 @@ public class MeshSimulatorService {
         return devices.get(id);
     }
 
-    /**
-     * Sender drops a packet into the mesh by handing it to their own device.
-     */
     public void inject(String senderDeviceId, MeshPacket packet) {
         VirtualDevice sender = devices.get(senderDeviceId);
-        if (sender == null) throw new IllegalArgumentException("Unknown device: " + senderDeviceId);
+        if (sender == null) {
+            throw new IllegalArgumentException("Unknown device: " + senderDeviceId);
+        }
+        if (packet.getPath() == null || packet.getPath().isBlank()) {
+            packet.setPath(senderDeviceId);
+        }
         sender.hold(packet);
-        log.info("Packet {} injected at {} (TTL={})",
-                packet.getPacketId().substring(0, 8), senderDeviceId, packet.getTtl());
+        log.info("Packet {} / payment {} injected at {} (TTL={})",
+                shortId(packet.getPacketId()), shortId(packet.getPaymentId()),
+                senderDeviceId, packet.getTtl());
     }
 
     /**
-     * One round of gossip. Every device shares everything it has with every
-     * other device. TTL is decremented per hop; packets at TTL 0 stay where
-     * they are but are not forwarded further.
-     *
-     * Real BLE gossip would be pair-by-pair when devices come into range.
-     * For the demo we let everyone gossip with everyone in one round, which
-     * is equivalent to "fast-forward N rounds of pairwise gossip".
+     * One flooding round: each device forwards packets it currently holds to
+     * neighbors that have not seen that packetId, decrementing TTL.
      */
-    public GossipResult gossipOnce() {
+    public ForwardResult forwardOnce() {
+        dropExpiredPackets();
         int transfers = 0;
         List<VirtualDevice> deviceList = new ArrayList<>(devices.values());
-
-        // Snapshot what each device holds at the start of this round, so
-        // we don't gossip the same packet through 5 devices in 1 step.
         Map<String, List<MeshPacket>> snapshot = new HashMap<>();
         for (VirtualDevice d : deviceList) {
             snapshot.put(d.getDeviceId(), new ArrayList<>(d.getHeldPackets()));
@@ -80,41 +95,49 @@ public class MeshSimulatorService {
 
         for (VirtualDevice src : deviceList) {
             for (MeshPacket pkt : snapshot.get(src.getDeviceId())) {
-                if (pkt.getTtl() <= 0) continue;
-                for (VirtualDevice dst : deviceList) {
-                    if (dst == src) continue;
-                    if (dst.holds(pkt.getPacketId())) continue;
-                    MeshPacket copy = new MeshPacket();
-                    copy.setPacketId(pkt.getPacketId());
-                    copy.setTtl(pkt.getTtl() - 1);
-                    copy.setCreatedAt(pkt.getCreatedAt());
-                    copy.setCiphertext(pkt.getCiphertext());
-                    dst.hold(copy);
+                if (pkt.getTtl() <= 0) {
+                    continue;
+                }
+                for (String neighborId : src.getNeighborIds()) {
+                    VirtualDevice dst = devices.get(neighborId);
+                    if (dst == null || dst.holds(pkt.getPacketId())) {
+                        continue;
+                    }
+                    dst.hold(pkt.copyForForward(dst.getDeviceId()));
                     transfers++;
                 }
             }
         }
 
-        log.info("Gossip round complete: {} packet transfers", transfers);
-        return new GossipResult(transfers, snapshotMap());
+        log.info("Forward round complete: {} transfers", transfers);
+        return new ForwardResult(transfers, snapshotMap());
+    }
+
+    /** Alias for older clients; forwarding is controlled flooding, not gossip. */
+    @Deprecated
+    public ForwardResult gossipOnce() {
+        return forwardOnce();
     }
 
     public Map<String, Integer> snapshotMap() {
         Map<String, Integer> m = new LinkedHashMap<>();
-        for (VirtualDevice d : devices.values()) {
-            m.put(d.getDeviceId(), d.packetCount());
+        for (String id : List.of("phone-alice", "phone-relay", "phone-market",
+                "phone-bridge-1", "phone-bridge-2")) {
+            VirtualDevice d = devices.get(id);
+            if (d != null) {
+                m.put(d.getDeviceId(), d.packetCount());
+            }
         }
         return m;
     }
 
-    /**
-     * Returns all packets held by devices with internet — these are what would
-     * be uploaded to the backend the moment they reach connectivity.
-     */
     public List<BridgeUpload> collectBridgeUploads() {
+        dropExpiredPackets();
         List<BridgeUpload> out = new ArrayList<>();
         for (VirtualDevice d : devices.values()) {
-            if (!d.hasInternet()) continue;
+            if (!d.hasInternet()) {
+                continue;
+            }
             for (MeshPacket pkt : d.getHeldPackets()) {
                 out.add(new BridgeUpload(d.getDeviceId(), pkt));
             }
@@ -126,6 +149,32 @@ public class MeshSimulatorService {
         devices.values().forEach(VirtualDevice::clear);
     }
 
-    public record GossipResult(int transfers, Map<String, Integer> deviceCounts) {}
+    public List<InFlightPayment> inFlight() {
+        dropExpiredPackets();
+        Map<String, InFlightPayment> byPayment = new LinkedHashMap<>();
+        for (VirtualDevice d : devices.values()) {
+            for (MeshPacket pkt : d.getHeldPackets()) {
+                InFlightPayment row = byPayment.computeIfAbsent(pkt.getPaymentId(),
+                        id -> new InFlightPayment(id, pkt.getPacketId(), pkt.getPath(), new ArrayList<>()));
+                row.devices().add(d.getDeviceId());
+            }
+        }
+        return new ArrayList<>(byPayment.values());
+    }
+
+    private void dropExpiredPackets() {
+        long cutoff = Instant.now().toEpochMilli() - maxAgeSeconds * 1000L;
+        devices.values().forEach(d -> d.dropExpired(cutoff));
+    }
+
+    private static String shortId(String id) {
+        if (id == null || id.length() < 8) {
+            return String.valueOf(id);
+        }
+        return id.substring(0, 8);
+    }
+
+    public record ForwardResult(int transfers, Map<String, Integer> deviceCounts) {}
     public record BridgeUpload(String bridgeNodeId, MeshPacket packet) {}
+    public record InFlightPayment(String paymentId, String packetId, String path, List<String> devices) {}
 }

@@ -3,20 +3,19 @@ package com.demo.upimesh.service;
 import com.demo.upimesh.model.MeshPacket;
 
 import java.util.Collection;
-import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A simulated phone in the mesh. Holds packets it has seen.
- *
- * In the real system, this state would be on a physical Android device,
- * with packets exchanged via BLE GATT characteristics.
+ * One simulated phone. Neighbors are other device ids on the static mesh graph.
+ * {@code heldPackets} is also the per-device seen set (duplicate suppression).
  */
 public class VirtualDevice {
 
     private final String deviceId;
     private final boolean hasInternet;
-    private final Map<String, MeshPacket> heldPackets = new ConcurrentHashMap<>();
+    private final Set<String> neighborIds = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<String, MeshPacket> heldPackets = new ConcurrentHashMap<>();
 
     public VirtualDevice(String deviceId, boolean hasInternet) {
         this.deviceId = deviceId;
@@ -25,6 +24,14 @@ public class VirtualDevice {
 
     public String getDeviceId() { return deviceId; }
     public boolean hasInternet() { return hasInternet; }
+
+    public void addNeighbor(String neighborId) {
+        neighborIds.add(neighborId);
+    }
+
+    public Set<String> getNeighborIds() {
+        return Set.copyOf(neighborIds);
+    }
 
     public void hold(MeshPacket packet) {
         heldPackets.putIfAbsent(packet.getPacketId(), packet);
@@ -40,6 +47,13 @@ public class VirtualDevice {
 
     public int packetCount() {
         return heldPackets.size();
+    }
+
+    public void dropExpired(long cutoffEpochMillis) {
+        heldPackets.entrySet().removeIf(e -> {
+            Long created = e.getValue().getCreatedAt();
+            return created != null && created < cutoffEpochMillis;
+        });
     }
 
     public void clear() {

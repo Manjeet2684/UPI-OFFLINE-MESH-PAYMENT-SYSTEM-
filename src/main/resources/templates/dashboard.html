@@ -2,7 +2,7 @@
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>UPI Offline Mesh — Demo</title>
+    <title>UPI Offline Mesh Payment System</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -10,82 +10,55 @@
             margin: 0; padding: 24px; background: #0d1117; color: #e6edf3;
         }
         h1 { margin-top: 0; color: #f0f6fc; }
-        h2 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 4px; margin-top: 32px; }
+        h2 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 4px; margin-top: 28px; }
         .container { max-width: 1200px; margin: 0 auto; }
         .grid { display: grid; gap: 16px; }
         .grid-2 { grid-template-columns: 1fr 1fr; }
-        .grid-3 { grid-template-columns: repeat(3, 1fr); }
-        .card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px;
-        }
-        .device {
-            border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-bottom: 8px;
-            background: #0d1117;
-        }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+        .device { border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-bottom: 8px; background: #0d1117; }
         .device.bridge { border-color: #2ea043; background: #052e16; }
-        .device.offline { opacity: 0.85; }
-        .badge {
-            display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px;
-            font-weight: 600; margin-left: 8px;
-        }
+        .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; margin-left: 8px; }
         .badge-online { background: #2ea043; color: white; }
         .badge-offline { background: #6e7681; color: white; }
-        .packet-id {
-            font-family: 'Consolas', 'Monaco', monospace; font-size: 11px;
-            background: #21262d; padding: 2px 6px; border-radius: 3px; margin: 2px;
-            display: inline-block;
-        }
-        button {
-            background: #238636; color: white; border: none; padding: 8px 16px;
-            border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;
-            margin: 4px;
-        }
+        .packet-id { font-family: Consolas, Monaco, monospace; font-size: 11px; background: #21262d; padding: 2px 6px; border-radius: 3px; margin: 2px; display: inline-block; }
+        button { background: #238636; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; margin: 4px; }
         button:hover { background: #2ea043; }
         button.danger { background: #da3633; }
-        button.danger:hover { background: #f85149; }
         button.secondary { background: #1f6feb; }
-        button.secondary:hover { background: #388bfd; }
-        input, select {
-            background: #0d1117; color: #e6edf3; border: 1px solid #30363d;
-            border-radius: 4px; padding: 6px 10px; font-size: 14px; margin: 4px;
-        }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        input, select { background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 4px; padding: 6px 10px; font-size: 14px; margin: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { text-align: left; padding: 8px; border-bottom: 1px solid #30363d; }
-        th { color: #8b949e; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+        th { color: #8b949e; font-weight: 600; font-size: 11px; text-transform: uppercase; }
         .status-SETTLED { color: #56d364; font-weight: 600; }
-        .status-REJECTED { color: #f85149; font-weight: 600; }
-        .status-DUPLICATE_DROPPED { color: #d29922; font-weight: 600; }
-        .status-INVALID { color: #f85149; font-weight: 600; }
-        #log {
-            background: #010409; color: #7ee787; padding: 12px; border-radius: 6px;
-            font-family: 'Consolas', 'Monaco', monospace; font-size: 12px;
-            max-height: 220px; overflow-y: auto; white-space: pre-wrap;
-            border: 1px solid #30363d;
-        }
-        .controls { background: #161b22; padding: 16px; border-radius: 8px;
-                    border: 1px solid #30363d; margin-bottom: 16px; }
-        .step-num {
-            display: inline-block; background: #58a6ff; color: white;
-            border-radius: 50%; width: 24px; height: 24px; text-align: center;
-            line-height: 24px; font-weight: 600; margin-right: 8px;
-        }
-        .balance { font-family: 'Consolas', monospace; color: #56d364; font-weight: 600; }
+        .status-REJECTED, .status-INVALID { color: #f85149; font-weight: 600; }
+        .status-DUPLICATE { color: #d29922; font-weight: 600; }
+        .status-IN_MESH_NOT_SETTLED { color: #d29922; font-weight: 600; }
+        #log { background: #010409; color: #7ee787; padding: 12px; border-radius: 6px; font-family: Consolas, Monaco, monospace; font-size: 12px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #30363d; }
+        .controls { background: #161b22; padding: 16px; border-radius: 8px; border: 1px solid #30363d; margin-bottom: 16px; }
+        .step-num { display: inline-block; background: #58a6ff; color: white; border-radius: 50%; width: 24px; height: 24px; text-align: center; line-height: 24px; font-weight: 600; margin-right: 8px; }
+        .balance { font-family: Consolas, monospace; color: #56d364; font-weight: 600; }
         .small { font-size: 12px; color: #8b949e; }
+        .pass { color: #56d364; font-weight: 700; }
+        .fail { color: #f85149; font-weight: 700; }
+        .topo { font-family: Consolas, Monaco, monospace; font-size: 12px; color: #8b949e; white-space: pre; background: #0d1117; padding: 12px; border-radius: 6px; }
+        @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>📡 UPI Offline Mesh — Live Demo</h1>
+    <h1>UPI Offline Mesh Payment System</h1>
     <p class="small">
-        Send money in a basement with zero internet. Encrypted packets gossip from phone to phone
-        until one with 4G reaches the backend.
+        Create a UPI-like payment with no internet. The packet is signed (Ed25519) and encrypted
+        (RSA-OAEP + AES-256-GCM), then flooded across a <strong>simulated</strong> device mesh.
+        Until a bridge uploads it, the payment is an IOU — <strong>not settled</strong>.
+        Two bridges may deliver the same packet; the ledger moves money at most once.
+        This is a deferred-settlement simulation, not NPCI/UPI or Bluetooth.
     </p>
 
     <div class="controls">
-        <h3 style="margin-top:0">🎬 Demo Flow</h3>
-
+        <h3 style="margin-top:0">Offline payment flow</h3>
         <div>
-            <span class="step-num">1</span><strong>Compose payment</strong> (simulates sender phone)
+            <span class="step-num">1</span><strong>Compose payment</strong> (simulated offline device)
             <br>
             <select id="senderVpa">
                 <option>alice@demo</option>
@@ -99,145 +72,201 @@
                 <option>alice@demo</option>
                 <option>dave@demo</option>
             </select>
-            ₹<input type="number" id="amount" value="500" style="width: 100px">
-            PIN <input type="text" id="pin" value="1234" style="width: 80px" maxlength="4">
-            <button onclick="sendPacket()">📤 Inject into Mesh</button>
+            ₹<input type="number" id="amount" value="500" step="0.01" style="width: 100px">
+            <button onclick="sendPacket()">Create &amp; inject</button>
         </div>
-
         <div style="margin-top: 16px">
-            <span class="step-num">2</span><strong>Gossip</strong> — packets hop device-to-device
-            <button class="secondary" onclick="gossip()">🔄 Run Gossip Round</button>
+            <span class="step-num">2</span><strong>Forward through mesh</strong> (controlled flooding, not gossip)
+            <button class="secondary" onclick="forward()">Forward one hop</button>
+            <span class="small">Need ~3 hops for both bridges to hold the packet.</span>
         </div>
-
         <div style="margin-top: 16px">
-            <span class="step-num">3</span><strong>Bridge node walks outside, hits 4G</strong>
-            <button class="secondary" onclick="flushBridges()">📡 Bridges Upload to Backend</button>
-            <span class="small">(parallel — exercises idempotency)</span>
+            <span class="step-num">3</span><strong>Bridges regain connectivity</strong>
+            <button class="secondary" onclick="flushBridges()">Upload from both bridges</button>
         </div>
-
         <div style="margin-top: 16px">
-            <button class="danger" onclick="resetMesh()">🗑 Reset Mesh + Cache</button>
+            <button class="danger" onclick="resetMesh()">Clear mesh only</button>
         </div>
+        <pre class="topo">phone-alice
+     |
+phone-relay ---- phone-market
+     |                 |
+phone-bridge-1   phone-bridge-2
+     \                 /
+           server</pre>
     </div>
 
     <div class="grid grid-2">
         <div class="card">
-            <h2>📱 Mesh Devices</h2>
+            <h2>Mesh</h2>
             <div id="devices"></div>
         </div>
-
         <div class="card">
-            <h2>🏦 Account Balances</h2>
+            <h2>In flight (not settled)</h2>
+            <p class="small">Packets currently on devices. No ledger row yet — this is delayed/offline delivery.</p>
+            <table id="inflight-table">
+                <thead><tr><th>Payment</th><th>Devices</th><th>Path</th><th>Status</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="card">
+            <h2>Account balances</h2>
             <table id="accounts-table">
                 <thead><tr><th>VPA</th><th>Holder</th><th>Balance</th></tr></thead>
                 <tbody></tbody>
             </table>
-            <p class="small" id="cacheInfo"></p>
         </div>
     </div>
 
     <div class="card" style="margin-top: 16px">
-        <h2>📜 Transaction Ledger</h2>
-        <table id="tx-table">
+        <h2>Delivery attempts</h2>
+        <p class="small">Every bridge ingest is recorded. Duplicate delivery is visible here; the ledger still moves money once.</p>
+        <table id="attempt-table">
             <thead><tr>
-                <th>ID</th><th>From</th><th>To</th><th>Amount</th>
-                <th>Status</th><th>Bridge</th><th>Hops</th><th>Settled</th>
+                <th>ID</th><th>Payment</th><th>Bridge</th><th>Outcome</th><th>Reason</th><th>Path</th><th>Hops</th>
             </tr></thead>
             <tbody></tbody>
         </table>
     </div>
 
     <div class="card" style="margin-top: 16px">
-        <h2>🪵 Activity Log</h2>
+        <h2>Ledger</h2>
+        <table id="tx-table">
+            <thead><tr>
+                <th>ID</th><th>Payment</th><th>From</th><th>To</th><th>Amount</th>
+                <th>Status</th><th>Bridge</th><th>Hops</th>
+            </tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="card" style="margin-top: 16px">
+        <h2>Correctness lab</h2>
+        <p class="small">Runs the real ingest/settlement path and checks balances/ledger. <strong>Resets demo ledger and balances.</strong></p>
+        <select id="labScenario"></select>
+        <button onclick="runLab()">Run experiment</button>
+        <div id="labResult" class="small" style="margin-top:12px;white-space:pre-wrap;font-family:Consolas,monospace"></div>
+    </div>
+
+    <div class="card" style="margin-top: 16px">
+        <h2>Activity</h2>
         <div id="log"></div>
     </div>
 </div>
-
 <script>
 function log(msg) {
     const el = document.getElementById('log');
     el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n' + el.textContent;
 }
-
+function shortId(id) {
+    if (!id) return '';
+    return id.length > 8 ? id.substring(0, 8) : id;
+}
 async function refresh() {
-    // Mesh state
     const m = await fetch('/api/mesh/state').then(r => r.json());
-    const devicesDiv = document.getElementById('devices');
-    devicesDiv.innerHTML = m.devices.map(d => `
+    document.getElementById('devices').innerHTML = m.devices.map(d => `
         <div class="device ${d.hasInternet ? 'bridge' : 'offline'}">
             <strong>${d.deviceId}</strong>
             <span class="badge ${d.hasInternet ? 'badge-online' : 'badge-offline'}">
-                ${d.hasInternet ? '🌐 4G' : '🚫 OFFLINE'}
+                ${d.hasInternet ? 'BRIDGE' : 'OFFLINE'}
             </span>
-            <span class="small">holding ${d.packetCount} packet(s)</span>
-            <div>${d.packetIds.map(id => `<span class="packet-id">${id}</span>`).join('')}</div>
-        </div>
-    `).join('');
-    document.getElementById('cacheInfo').textContent =
-        `Idempotency cache size: ${m.idempotencyCacheSize}`;
+            <div class="small">neighbors: ${(d.neighbors || []).join(', ')} · holding ${d.packetCount}</div>
+            <div>${(d.packetIds || []).map(id => `<span class="packet-id">${id}</span>`).join('')}</div>
+        </div>`).join('');
 
-    // Accounts
     const accs = await fetch('/api/accounts').then(r => r.json());
-    document.querySelector('#accounts-table tbody').innerHTML = accs.map(a => `
-        <tr><td>${a.vpa}</td><td>${a.holderName}</td>
-            <td class="balance">₹${parseFloat(a.balance).toFixed(2)}</td></tr>
-    `).join('');
+    document.querySelector('#accounts-table tbody').innerHTML = accs.map(a =>
+        `<tr><td>${a.vpa}</td><td>${a.holderName}</td><td class="balance">₹${Number(a.balance).toFixed(2)}</td></tr>`
+    ).join('');
 
-    // Transactions
+    document.querySelector('#inflight-table tbody').innerHTML = (m.inFlight || []).map(p => `
+        <tr>
+            <td>${shortId(p.paymentId)}</td>
+            <td class="small">${(p.devices || []).join(', ')}</td>
+            <td class="small">${p.path || ''}</td>
+            <td class="${p.settled ? 'status-SETTLED' : 'status-IN_MESH_NOT_SETTLED'}">${p.status}</td>
+        </tr>`).join('') || '<tr><td colspan="4" class="small">No packets in the mesh</td></tr>';
+
+    const attempts = await fetch('/api/deliveries').then(r => r.json());
+    document.querySelector('#attempt-table tbody').innerHTML = attempts.map(t => `
+        <tr>
+            <td>${t.id}</td>
+            <td>${shortId(t.paymentId)}</td>
+            <td>${t.bridgeId}</td>
+            <td class="status-${t.outcome}">${t.outcome}</td>
+            <td>${t.reason || ''}</td>
+            <td class="small">${t.path || ''}</td>
+            <td>${t.hopCount}</td>
+        </tr>`).join('');
+
     const txs = await fetch('/api/transactions').then(r => r.json());
     document.querySelector('#tx-table tbody').innerHTML = txs.map(t => `
         <tr>
-            <td>${t.id}</td><td>${t.senderVpa}</td><td>${t.receiverVpa}</td>
-            <td class="balance">₹${parseFloat(t.amount).toFixed(2)}</td>
+            <td>${t.id}</td>
+            <td>${shortId(t.paymentId)}</td>
+            <td>${t.senderVpa}</td>
+            <td>${t.receiverVpa}</td>
+            <td class="balance">₹${Number(t.amount).toFixed(2)}</td>
             <td class="status-${t.status}">${t.status}</td>
-            <td>${t.bridgeNodeId}</td><td>${t.hopCount}</td>
-            <td class="small">${new Date(t.settledAt).toLocaleTimeString()}</td>
-        </tr>
-    `).join('');
+            <td>${t.bridgeNodeId}</td>
+            <td>${t.hopCount}</td>
+        </tr>`).join('');
 }
-
 async function sendPacket() {
     const body = {
         senderVpa: document.getElementById('senderVpa').value,
         receiverVpa: document.getElementById('receiverVpa').value,
-        amount: parseFloat(document.getElementById('amount').value),
-        pin: document.getElementById('pin').value,
+        amount: document.getElementById('amount').value,
         ttl: 5,
         startDevice: 'phone-alice'
     };
-    const r = await fetch('/api/demo/send', {
+    const res = await fetch('/api/demo/send', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
-    }).then(r => r.json());
-    log(`📤 Packet ${r.packetId.substring(0,8)} encrypted & injected at ${r.injectedAt} (TTL ${r.ttl})`);
-    log(`   ciphertext (truncated): ${r.ciphertextPreview}`);
+    });
+    const r = await res.json();
+    if (!res.ok) { log('Create failed: ' + JSON.stringify(r)); return; }
+    log('Created payment ' + shortId(r.paymentId) + ' packet ' + shortId(r.packetId) + ' at ' + r.injectedAt + ' — NOT SETTLED yet');
     refresh();
 }
-
-async function gossip() {
-    const r = await fetch('/api/mesh/gossip', {method: 'POST'}).then(r => r.json());
-    log(`🔄 Gossip: ${r.transfers} transfer(s) — ${JSON.stringify(r.deviceCounts)}`);
+async function forward() {
+    const r = await fetch('/api/mesh/forward', {method: 'POST'}).then(r => r.json());
+    log('Forward: ' + r.transfers + ' transfer(s) — ' + JSON.stringify(r.deviceCounts));
     refresh();
 }
-
 async function flushBridges() {
     const r = await fetch('/api/mesh/flush', {method: 'POST'}).then(r => r.json());
-    log(`📡 ${r.uploadsAttempted} bridge upload(s):`);
-    r.results.forEach(res => {
-        log(`   ${res.bridgeNode} packet ${res.packetId} → ${res.outcome}` +
-            (res.reason ? ` (${res.reason})` : ''));
+    log(r.uploadsAttempted + ' bridge upload(s):');
+    (r.results || []).forEach(res => {
+        log('  ' + res.bridgeNode + ' payment ' + shortId(res.paymentId) + ' path=' + res.path + ' → ' + res.outcome +
+            (res.reason ? ' (' + res.reason + ')' : ''));
     });
     refresh();
 }
-
 async function resetMesh() {
     await fetch('/api/mesh/reset', {method: 'POST'});
-    log('🗑 mesh + idempotency cache cleared');
+    log('Mesh cleared (ledger kept)');
     refresh();
 }
-
+async function loadLab() {
+    const scenarios = await fetch('/api/lab/scenarios').then(r => r.json());
+    document.getElementById('labScenario').innerHTML = scenarios.map(s =>
+        `<option value="${s.id}">${s.id} — ${s.description}</option>`).join('');
+}
+async function runLab() {
+    const id = document.getElementById('labScenario').value;
+    const report = await fetch('/api/lab/run/' + id, {method: 'POST'}).then(r => r.json());
+    document.getElementById('labResult').innerHTML =
+        `<span class="${report.passed ? 'pass' : 'fail'}">${report.passed ? 'PASS' : 'FAIL'}</span> ${report.scenarioId}\n` +
+        'expected: ' + (report.expected || []).join('; ') + '\n' +
+        'actual: ' + (report.actual || []).join('; ') + '\n' +
+        ((report.failures || []).length ? ('failures: ' + report.failures.join('; ')) : '');
+    log('Lab ' + id + ' → ' + (report.passed ? 'PASS' : 'FAIL'));
+    refresh();
+}
+loadLab();
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh, 4000);
 </script>
 </body>
 </html>
